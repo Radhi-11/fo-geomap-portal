@@ -3,11 +3,54 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import NewProjectModal from '../../components/NewProjectModal';
 
-const defaultInitialProjects = [
-  { name: '[PREVENTIVE MAINTENANCE AKSES FIBER_OPTIC] DESA BENTE MOROWALI', province: 'Sulawesi Tengah', city: 'Morowali', length: 1.28, value: 11784900, status: 'PENDING', date: '27 Aug 2026', route: [[-2.5371, 121.9895], [-2.5471, 121.9995]] },
-  { name: 'FTTH Bandung Selatan', province: 'Jawa Barat', city: 'Bandung', length: 3.25, value: 450000000, status: 'VERIFIED', date: '20 Aug 2026', route: [[-6.9147, 107.6098], [-6.9247, 107.6198]] },
-  { name: 'ODP Relocation Depok', province: 'Jawa Barat', city: 'Depok', length: 1.2, value: 85000000, status: 'REVISION', date: '24 Aug 2026', route: [[-6.4025, 106.8186], [-6.4125, 106.8286]] },
-];
+// Data dummy telah dihapus, sekarang dimulai dengan array kosong
+const defaultInitialProjects: any[] = [];
+
+const calculateRouteLength = (coords: [number, number][]) => {
+  if (!coords || !Array.isArray(coords) || coords.length === 0) return 0;
+  let totalMeters = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [lat1, lon1] = coords[i];
+    const [lat2, lon2] = coords[i + 1];
+    if (lat1 === undefined || lon1 === undefined || lat2 === undefined || lon2 === undefined) continue;
+    const a = 6378137.0; 
+    const b = 6356752.314245; 
+    const f = 1 / 298.257223563;
+    const L = (lon2 - lon1) * Math.PI / 180;
+    const U1 = Math.atan((1 - f) * Math.tan(lat1 * Math.PI / 180));
+    const U2 = Math.atan((1 - f) * Math.tan(lat2 * Math.PI / 180));
+    const sinU1 = Math.sin(U1), cosU1 = Math.cos(U1);
+    const sinU2 = Math.sin(U2), cosU2 = Math.cos(U2);
+    let lambda = L, lambdaP = 2 * Math.PI;
+    let iterLimit = 100;
+    let sinLambda = 0, cosLambda = 0, sinSigma = 0, cosSigma = 0, sigma = 0, sinAlpha = 0;
+    let cosSqAlpha = 0, cos2SigmaM = 0;
+    while (Math.abs(lambda - lambdaP) > 1e-12 && --iterLimit > 0) {
+      sinLambda = Math.sin(lambda);
+      cosLambda = Math.cos(lambda);
+      sinSigma = Math.sqrt((cosU2 * sinLambda) * (cosU2 * sinLambda) + 
+                           (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda) * (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda));
+      if (sinSigma === 0) break; 
+      cosSigma = sinU1 * sinU2 + cosU1 * cosU2 * cosLambda;
+      sigma = Math.atan2(sinSigma, cosSigma);
+      sinAlpha = cosU1 * cosU2 * sinLambda / sinSigma;
+      cosSqAlpha = 1 - sinAlpha * sinAlpha;
+      cos2SigmaM = cosSigma - 2 * sinU1 * sinU2 / (cosSqAlpha || 1);
+      const C = f / 16 * cosSqAlpha * (4 + f * (4 - 3 * cosSqAlpha));
+      lambdaP = lambda;
+      lambda = L + (1 - C) * f * sinAlpha * (sigma + C * sinSigma * (cos2SigmaM + C * cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM)));
+    }
+    if (iterLimit > 0 && sinSigma !== 0) {
+      const uSq = cosSqAlpha * (a * a - b * b) / (b * b);
+      const A = 1 + uSq / 16384 * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+      const B = uSq / 1024 * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
+      const deltaSigma = B * sinSigma * (cos2SigmaM + B / 4 * (cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM) - 
+                         B / 6 * cos2SigmaM * (-3 + 4 * sinSigma * sinSigma) * (-3 + 4 * cos2SigmaM * cos2SigmaM)));
+      totalMeters += b * A * (sigma - deltaSigma);
+    }
+  }
+  return totalMeters / 1000;
+};
 
 const getStoredProjects = () => {
   const saved = localStorage.getItem('fo_projects');
@@ -51,14 +94,13 @@ export default function ProjectListPage() {
 
   const handleDeleteProject = (index: number, e: React.MouseEvent) => {
     e.preventDefault();
-    if (window.confirm(`Apakah Anda yakin ingin menghapus project nomor ${index + 1}?`)) {
+    if (window.confirm(`Apakah Anda yakin ingin menghapus project ini?`)) {
       const updated = projects.filter((_: any, i: number) => i !== index);
       setProjects(updated);
       localStorage.setItem('fo_projects', JSON.stringify(updated));
     }
   };
 
-  // Fungsi Ekspor CSV
   const handleExportCSV = () => {
     if (projects.length === 0) {
       alert("Tidak ada data project untuk diekspor!");
@@ -71,7 +113,7 @@ export default function ProjectListPage() {
       `"${p.name.replace(/"/g, '""')}"`,
       `"${p.province || '-'}"`,
       `"${p.city || '-'}"`,
-      p.length,
+      p.route ? calculateRouteLength(p.route) : p.length,
       p.value,
       p.status,
       `"${p.date || '-'}"`
@@ -88,7 +130,6 @@ export default function ProjectListPage() {
     document.body.removeChild(link);
   };
 
-  // Filter pencarian teks dan filter status dropdown/tombol
   const filteredProjects = projects.filter((project: any) => {
     const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (project.city && project.city.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -137,7 +178,6 @@ export default function ProjectListPage() {
           />
         </div>
 
-        {/* Tombol Filter Status */}
         <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
           {['ALL', 'PENDING', 'VERIFIED', 'REVISION', 'REJECTED'].map((st) => (
             <button
@@ -184,7 +224,7 @@ export default function ProjectListPage() {
                     <div className="text-gray-800">{project.city || '-'}</div>
                     <div className="text-gray-500 text-xs mt-0.5">{project.province || '-'}</div>
                   </td>
-                  <td className="py-4 px-6 font-medium text-gray-700">{project.length} KM</td>
+                  <td className="py-4 px-6 font-medium text-gray-700">{Number(project.route ? calculateRouteLength(project.route) : project.length).toFixed(2)} KM</td>
                   <td className="py-4 px-6 font-medium text-gray-800">{formatRupiah(project.value)}</td>
                   <td className="py-4 px-6">
                     <span className={`px-2.5 py-1 text-xs font-semibold border rounded-full ${getStatusBadge(project.status)}`}>
@@ -212,8 +252,12 @@ export default function ProjectListPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-gray-500">
-                  Tidak ada project dengan status tersebut.
+                <td colSpan={7} className="py-12 text-center text-gray-500">
+                  <div className="flex flex-col items-center justify-center">
+                    <FileSpreadsheet className="w-10 h-10 text-gray-300 mb-3" />
+                    <p className="text-lg font-semibold text-gray-700">Belum ada project</p>
+                    <p className="text-sm">Klik tombol "New Project" untuk mengunggah project baru.</p>
+                  </div>
                 </td>
               </tr>
             )}
