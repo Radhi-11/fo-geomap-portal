@@ -1,11 +1,19 @@
 // File: src/pages/auth/ChangePasswordPage.tsx
 import { useState } from 'react';
 import { KeyRound, ShieldAlert } from 'lucide-react';
+import { getCurrentUser, setCurrentUser, getAdminUser, saveAdminUser, getRegisteredUsers, saveRegisteredUsers } from '../../utils/authService';
 
 export default function ChangePasswordPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+
+  const activeUser = getCurrentUser();
+
+  if (!activeUser) {
+    window.location.href = '/login';
+    return null;
+  }
 
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,23 +26,23 @@ export default function ChangePasswordPage() {
       return;
     }
 
-    // Ambil session user aktif
-    const activeUser = JSON.parse(localStorage.getItem('auth_user') || '{}');
-    const allUsers = JSON.parse(localStorage.getItem('app_users') || '[]');
-
-    // Update password user di database lokal dan hilangkan flag mustChangePassword
-    const updatedUsers = allUsers.map((u: any) => {
-      if (u.email === activeUser.email) {
-        return { ...u, password: newPassword, mustChangePassword: false };
-      }
-      return u;
-    });
-
-    localStorage.setItem('app_users', JSON.stringify(updatedUsers));
-    
-    // Update active session
-    activeUser.mustChangePassword = false;
-    localStorage.setItem('auth_user', JSON.stringify(activeUser));
+    if (activeUser.role === 'admin') {
+      const admin = getAdminUser();
+      const updatedAdmin = { ...admin, password: newPassword, mustChangePassword: false };
+      saveAdminUser(updatedAdmin);
+      setCurrentUser(updatedAdmin);
+    } else {
+      const users = getRegisteredUsers();
+      const updatedUsers = users.map(u => {
+        if (u.username === activeUser.username || u.email === activeUser.email) {
+          return { ...u, password: newPassword, mustChangePassword: false };
+        }
+        return u;
+      });
+      saveRegisteredUsers(updatedUsers);
+      const updatedUser = updatedUsers.find(u => u.username === activeUser.username || u.email === activeUser.email);
+      if (updatedUser) setCurrentUser(updatedUser);
+    }
 
     alert('Password berhasil diperbarui! Selamat datang di portal.');
     window.location.href = '/';

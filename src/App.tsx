@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './components/layout/MainLayout';
 import LoginPage from './pages/auth/LoginPage';
-import RegisterPage from './pages/auth/RegisterPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
+import ChangeCredentialsPage from './pages/auth/ChangeCredentialsPage';
+import ManageUsersPage from './pages/auth/ManageUsersPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import UserDashboardPage from './pages/user/UserDashboardPage';
 import ProjectListPage from './pages/projects/ProjectListPage';
@@ -16,12 +17,11 @@ const PrivateRoute = ({ children, allowedRoles }: { children: any, allowedRoles:
   if (!saved) return <Navigate to="/login" replace />;
   const user = JSON.parse(saved);
 
-  // Jika user wajib ganti password, paksa arahkan ke halaman change-password
-  if (user.mustChangePassword && window.location.pathname !== '/change-password') {
+  if (user.mustChangePassword && window.location.pathname !== '/change-password' && window.location.pathname !== '/change-credentials') {
     return <Navigate to="/change-password" replace />;
   }
 
-  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />; 
+  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
   return children;
 };
 
@@ -38,8 +38,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
         <Route path="/change-password" element={<ChangePasswordPage />} />
+        <Route path="/change-credentials" element={<ChangeCredentialsPage />} />
+        <Route path="/users" element={<PrivateRoute allowedRoles={['admin']}><ManageUsersPage /></PrivateRoute>} />
         
         <Route element={<PrivateRoute allowedRoles={['admin', 'user']}><MainLayout /></PrivateRoute>}>
           <Route path="/" element={<RoleBasedIndex />} />

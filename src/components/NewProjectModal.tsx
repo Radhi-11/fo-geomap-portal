@@ -73,10 +73,10 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
         }
       }
 
-      return allLatLngs.length > 0 ? allLatLngs : [[0.0, 0.0], [0.001, 0.001]];
+      return allLatLngs;
     } catch (e) {
       console.error("Gagal parsing file KMZ/KML:", e);
-      return [[0.0, 0.0], [0.001, 0.001]];
+      return [];
     }
   };
 
@@ -96,43 +96,91 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
           let lengthKm = 1.0;
           let parsedItems: any[] = [];
 
-          jsonData.forEach((row) => {
-            const rowStr = JSON.stringify(row);
-            if (rowStr.includes('PREVENTIVE MAINTENANCE') || rowStr.includes('NAMA PEKERJAAN') || rowStr.includes('Nama Project')) {
-              if (row[2] && typeof row[2] === 'string' && row[2].length > 5) {
-                projectName = row[2];
+          // Deteksi kolom KHS secara dinamis dengan memindai semua kolom
+          let khsColumnIndex = -1;
+          for (const row of jsonData) {
+            if (!row) continue;
+            for (let col = 0; col < row.length; col++) {
+              const cell = row[col];
+              if (cell && typeof cell === 'string' && cell.trim().toUpperCase().startsWith('KHS_')) {
+                khsColumnIndex = col;
+                break;
               }
             }
-            if (rowStr.includes('Panjang Jalur') || rowStr.includes('PANJANG JALUR')) {
-              const foundNum = row.find((cell: any) => typeof cell === 'number' && cell > 0);
-              if (foundNum) lengthKm = foundNum > 50 ? foundNum / 1000 : foundNum;
+            if (khsColumnIndex !== -1) break;
+          }
+
+          // Deteksi kolom KHS secara dinamis dengan memindai semua kolom
+          for (const row of jsonData) {
+            if (!row) continue;
+            const rowStr = JSON.stringify(row);
+
+            // Deteksi nama project (case-insensitive, multi-pattern)
+            if (/(PREVENTIVE MAINTENANCE|NAMA PEKERJAAN|NAMA PROJECT)/i.test(rowStr)) {
+              for (const cell of row) {
+                if (cell && typeof cell === 'string' && cell.trim().length > 5 &&
+                    !/(PREVENTIVE MAINTENANCE|NAMA PEKERJAAN|NAMA PROJECT)/i.test(cell)) {
+                  projectName = cell.trim();
+                  break;
+                }
+              }
             }
 
-            const colCode = String(row[2] || '');
-            if (colCode.startsWith('KHS_')) {
-              parsedItems.push({
-                code: colCode,
-                name: String(row[3] || 'Pekerjaan / Material FO'),
-                qty: Number(row[4] || 1),
-                unit: String(row[5] || 'Unit'),
-                submittedPrice: Number(row[6] || 0)
-              });
+            // Deteksi Panjang Jalur dengan pencarian sel "Panjang Jalur" lalu nilai di sebelah kanan
+            if (/PANJANG JALUR/i.test(rowStr)) {
+              for (let col = 0; col < row.length; col++) {
+                const cell = row[col];
+                if (cell && typeof cell === 'string' && /PANJANG JALUR/i.test(cell)) {
+                  // Cari angka di kolom setelah "Panjang Jalur"
+                  for (let j = col + 1; j < row.length; j++) {
+                    const val = row[j];
+                    if (val !== undefined && typeof val === 'number' && val > 0) {
+                      lengthKm = val > 50 ? val / 1000 : val;
+                      break;
+                    }
+                  }
+                  break;
+                }
+              }
             }
-          });
 
-          if (parsedItems.length === 0) {
-            parsedItems = [
-              { code: 'KHS_SMUO_099_M', name: 'Slack pada tiang include sabuk/klem', qty: 4, unit: 'Unit', submittedPrice: 146500 },
-              { code: 'KHS_SMUO_054_M', name: 'Asesoris tiang eksisting untuk kabel ADSS', qty: 40, unit: 'Unit', submittedPrice: 32100 }
-            ];
+            // Parsing item KHS menggunakan kolom yang terdeteksi
+            if (khsColumnIndex !== -1 && row[khsColumnIndex]) {
+              const colCode = String(row[khsColumnIndex]).trim();
+              if (colCode.toUpperCase().startsWith('KHS_')) {
+                parsedItems.push({
+                  code: colCode,
+                  name: String(row[khsColumnIndex + 1] || 'Pekerjaan / Material FO'),
+                  qty: Number(row[khsColumnIndex + 2] || 1),
+                  unit: String(row[khsColumnIndex + 3] || 'Unit'),
+                  submittedPrice: Number(row[khsColumnIndex + 4] || 0)
+                });
+              }
+            }
+          }
+
+          // Fallback jika tidak ada header row terdeteksi, coba sel-sel yang mengandung KHS_
+          if (khsColumnIndex === -1 && parsedItems.length === 0) {
+            for (const row of jsonData) {
+              if (!row) continue;
+              for (let col = 0; col < row.length; col++) {
+                const cell = row[col];
+                if (cell && typeof cell === 'string' && cell.trim().toUpperCase().startsWith('KHS_')) {
+                  parsedItems.push({
+                    code: cell.trim(),
+                    name: String(row[col + 1] || 'Pekerjaan / Material FO'),
+                    qty: Number(row[col + 2] || 1),
+                    unit: String(row[col + 3] || 'Unit'),
+                    submittedPrice: Number(row[col + 4] || 0)
+                  });
+                }
+              }
+            }
           }
 
           resolve({ projectName, lengthKm, parsedItems });
-        } catch (err) {
-          resolve({ 
-            projectName: file.name, lengthKm: 1.0, 
-            parsedItems: [{ code: 'KHS_SMUO_099_M', name: 'Slack pada tiang', qty: 4, unit: 'Unit', submittedPrice: 146500 }] 
-          });
+        } catch {
+          resolve({ projectName: file.name, lengthKm: 1.0, parsedItems: [] });
         }
       };
       reader.readAsBinaryString(file);
@@ -239,7 +287,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
       city: detectedCity,         // Lokasi asli otomatis terisi
       length: kmzLengthKm > 0 ? kmzLengthKm : boqResult.lengthKm,
       boqLength: boqResult.lengthKm, // Panjang dari Excel
-      value: totalCalculatedValue > 0 ? totalCalculatedValue : 11784900,
+      value: totalCalculatedValue,
       status: 'PENDING',
       route: routeCoordinates,
       boqItems: boqResult.parsedItems,
