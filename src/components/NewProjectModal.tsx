@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Upload, FileText, MapPin } from 'lucide-react';
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
@@ -14,6 +14,25 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
   const [boqFile, setBoqFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Proses File Otomatis...');
+
+  const kmzFileInputRef = useRef<HTMLInputElement>(null);
+  const boqFileInputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      isMountedRef.current = true;
+      if (kmzFileInputRef.current) kmzFileInputRef.current.value = '';
+      if (boqFileInputRef.current) boqFileInputRef.current.value = '';
+      setKmzFile(null);
+      setBoqFile(null);
+      setLoading(false);
+      setLoadingText('Proses File Otomatis...');
+    }
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -80,7 +99,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     }
   };
 
-  // Parser Excel BoQ
+  // Parser Excel BoQ (DIPERBARUI: Super Dinamis & Toleran Terhadap Pergeseran Format Excel)
   const parseBoqExcel = async (file: File) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -88,99 +107,119 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
         try {
           const data = e.target?.result;
           const workbook = XLSX.read(data, { type: 'binary' });
-          const sheetName = workbook.SheetNames.includes('BOQ') ? 'BOQ' : workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
           let projectName = file.name.replace(/\.[^/.]+$/, "");
-          let lengthKm = 1.0;
+          let lengthKm = 0;
+          let totalValue = 0;
           let parsedItems: any[] = [];
 
-          // Deteksi kolom KHS secara dinamis dengan memindai semua kolom
-          let khsColumnIndex = -1;
-          for (const row of jsonData) {
-            if (!row) continue;
-            for (let col = 0; col < row.length; col++) {
-              const cell = row[col];
-              if (cell && typeof cell === 'string' && cell.trim().toUpperCase().startsWith('KHS_')) {
-                khsColumnIndex = col;
-                break;
-              }
-            }
-            if (khsColumnIndex !== -1) break;
-          }
+          // Iterasi KE SELURUH SHEET secara independen per upload
+          for (const sheetName of workbook.SheetNames) {
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-          // Deteksi kolom KHS secara dinamis dengan memindai semua kolom
-          for (const row of jsonData) {
-            if (!row) continue;
-            const rowStr = JSON.stringify(row);
+            // Sisir setiap baris dan kolom secara dinamis
+            for (let r = 0; r < jsonData.length; r++) {
+              const row = jsonData[r];
+              if (!row || !Array.isArray(row)) continue;
 
-            // Deteksi nama project (case-insensitive, multi-pattern)
-            if (/(PREVENTIVE MAINTENANCE|NAMA PEKERJAAN|NAMA PROJECT)/i.test(rowStr)) {
-              for (const cell of row) {
-                if (cell && typeof cell === 'string' && cell.trim().length > 5 &&
-                    !/(PREVENTIVE MAINTENANCE|NAMA PEKERJAAN|NAMA PROJECT)/i.test(cell)) {
-                  projectName = cell.trim();
-                  break;
-                }
-              }
-            }
+              for (let c = 0; c < row.length; c++) {
+                const cell = row[c];
+                if (!cell || typeof cell !== 'string') continue;
+                
+                const cellStr = cell.trim().toLowerCase();
 
-            // Deteksi Panjang Jalur dengan pencarian sel "Panjang Jalur" lalu nilai di sebelah kanan
-            if (/PANJANG JALUR/i.test(rowStr)) {
-              for (let col = 0; col < row.length; col++) {
-                const cell = row[col];
-                if (cell && typeof cell === 'string' && /PANJANG JALUR/i.test(cell)) {
-                  // Cari angka di kolom setelah "Panjang Jalur"
-                  for (let j = col + 1; j < row.length; j++) {
-                    const val = row[j];
-                    if (val !== undefined && typeof val === 'number' && val > 0) {
-                      lengthKm = val > 50 ? val / 1000 : val;
+                // 1. Pencarian Label "Nama Project"
+                if (cellStr.includes('nama project') || cellStr.includes('nama pekerjaan')) {
+                  // Cek kolom-kolom di kanannya untuk mencari isi teksnya
+                  for (let i = c + 1; i < row.length; i++) {
+                    if (row[i] && typeof row[i] === 'string' && row[i].trim().length > 2) {
+                      projectName = row[i].trim();
                       break;
                     }
                   }
-                  break;
                 }
-              }
-            }
 
-            // Parsing item KHS menggunakan kolom yang terdeteksi
-            if (khsColumnIndex !== -1 && row[khsColumnIndex]) {
-              const colCode = String(row[khsColumnIndex]).trim();
-              if (colCode.toUpperCase().startsWith('KHS_')) {
-                parsedItems.push({
-                  code: colCode,
-                  name: String(row[khsColumnIndex + 1] || 'Pekerjaan / Material FO'),
-                  qty: Number(row[khsColumnIndex + 2] || 1),
-                  unit: String(row[khsColumnIndex + 3] || 'Unit'),
-                  submittedPrice: Number(row[khsColumnIndex + 4] || 0)
-                });
+                // 2. Pencarian Label "Panjang Jalur"
+                if (cellStr.includes('panjang jalur') || cellStr.includes('panjang fo')) {
+                  for (let i = c + 1; i < row.length; i++) {
+                    if (typeof row[i] === 'number') {
+                      lengthKm = row[i];
+                      break;
+                    } else if (typeof row[i] === 'string') {
+                      const parsed = parseFloat(row[i].replace(/[^\d.-]/g, ''));
+                      if (!isNaN(parsed) && parsed > 0) {
+                        lengthKm = parsed;
+                        break;
+                      }
+                    }
+                  }
+                }
+
+                // 3. Pencarian Label "Total Harga"
+                if (totalValue === 0 && (cellStr.includes('total harga') || cellStr === 'total' || cellStr.includes('grand total'))) {
+                  for (let i = c + 1; i < row.length; i++) {
+                    if (typeof row[i] === 'number' && row[i] > 1000) {
+                      totalValue = row[i];
+                      break;
+                    }
+                  }
+                }
+
+                // 4. Deteksi Item BoQ Otomatis (Mencari sel berawalan "KHS_")
+                if (cell.trim().toUpperCase().startsWith('KHS_')) {
+                  const code = cell.trim().toUpperCase();
+                  let name = 'Material / Jasa FO';
+                  let qty = 1;
+                  let unit = 'Unit';
+                  let price = 0;
+
+                  let foundName = false;
+                  let foundQty = false;
+                  let foundUnit = false;
+
+                  // Menyisir kolom di kanan KHS untuk mengekstrak Nama -> Qty -> Unit -> Harga
+                  for (let i = c + 1; i < row.length; i++) {
+                    const val = row[i];
+                    if (val === undefined || val === null || val === '') continue;
+
+                    if (!foundName && typeof val === 'string' && isNaN(Number(val))) {
+                      name = val.trim();
+                      foundName = true;
+                    } 
+                    else if (foundName && !foundQty && (typeof val === 'number' || !isNaN(Number(val)))) {
+                      qty = Number(val);
+                      foundQty = true;
+                    }
+                    else if (foundQty && !foundUnit && typeof val === 'string') {
+                      unit = val.trim();
+                      foundUnit = true;
+                    }
+                    else if (foundQty && (typeof val === 'number' || !isNaN(Number(val)))) {
+                      price = Number(val);
+                      break; // Harga satuan ditemukan, stop mencari di baris ini
+                    }
+                  }
+
+                  // Pastikan item tidak dimasukkan dua kali (misal jika ada di sheet Summary & sheet BoQ)
+                  if (!parsedItems.find(p => p.code === code && p.qty === qty)) {
+                    parsedItems.push({ code, name, qty, unit, submittedPrice: price });
+                  }
+                }
               }
             }
           }
 
-          // Fallback jika tidak ada header row terdeteksi, coba sel-sel yang mengandung KHS_
-          if (khsColumnIndex === -1 && parsedItems.length === 0) {
-            for (const row of jsonData) {
-              if (!row) continue;
-              for (let col = 0; col < row.length; col++) {
-                const cell = row[col];
-                if (cell && typeof cell === 'string' && cell.trim().toUpperCase().startsWith('KHS_')) {
-                  parsedItems.push({
-                    code: cell.trim(),
-                    name: String(row[col + 1] || 'Pekerjaan / Material FO'),
-                    qty: Number(row[col + 2] || 1),
-                    unit: String(row[col + 3] || 'Unit'),
-                    submittedPrice: Number(row[col + 4] || 0)
-                  });
-                }
-              }
-            }
+          // Fallback Kalkulasi jika ada field yang luput dari Excel
+          if (lengthKm > 100) lengthKm = lengthKm / 1000; // Standarisasi nilai meter ke KM
+          if (totalValue === 0 && parsedItems.length > 0) {
+            totalValue = parsedItems.reduce((acc, curr) => acc + (curr.qty * curr.submittedPrice), 0);
           }
 
-          resolve({ projectName, lengthKm, parsedItems });
-        } catch {
-          resolve({ projectName: file.name, lengthKm: 1.0, parsedItems: [] });
+          resolve({ projectName, lengthKm, parsedItems, totalValue });
+        } catch (error) {
+          console.error("Gagal memparsing BoQ Excel:", error);
+          resolve({ projectName: file.name, lengthKm: 1.0, parsedItems: [], totalValue: 0 });
         }
       };
       reader.readAsBinaryString(file);
@@ -249,28 +288,26 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
 
     const routeCoordinates = await parseKmlCoordinates(kmzFile);
     const boqResult: any = await parseBoqExcel(boqFile);
-    const totalCalculatedValue = boqResult.parsedItems.reduce((acc: number, curr: any) => acc + (curr.qty * curr.submittedPrice), 0);
+    const totalCalculatedValue = boqResult.totalValue > 0
+      ? boqResult.totalValue
+      : boqResult.parsedItems.reduce((acc: number, curr: any) => acc + (curr.qty * curr.submittedPrice), 0);
 
-    // Proses Geocoding Otomatis (Mendapatkan Kota & Provinsi dari Koordinat KMZ)
-    setLoadingText('Melacak Lokasi Wilayah...');
+    // Proses Geocoding Otomatis
+    if (isMountedRef.current) setLoadingText('Melacak Lokasi Wilayah...');
     let detectedCity = 'Lokasi Tidak Terdeteksi';
     let detectedProvince = 'Indonesia';
     
     if (routeCoordinates && routeCoordinates.length > 0) {
       const midIndex = Math.floor(routeCoordinates.length / 2);
-      const [lat, lon] = routeCoordinates[midIndex]; // Ambil titik tengah rute
+      const [lat, lon] = routeCoordinates[midIndex];
       
       try {
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`);
         const geoData = await res.json();
         
         if (geoData && geoData.address) {
-          // Cari spesifik wilayah (regency/city/county/town)
           detectedCity = geoData.address.city || geoData.address.regency || geoData.address.county || geoData.address.town || 'Lokasi Tidak Terdeteksi';
-          // Cari spesifik provinsi
           detectedProvince = geoData.address.state || geoData.address.region || 'Indonesia';
-          
-          // Hilangkan embel-embel "Kabupaten" atau "City" jika ada agar rapi
           detectedCity = detectedCity.replace('Kabupaten ', '').replace(' City', '');
         }
       } catch (err) {
@@ -283,10 +320,10 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     const newProject = {
       name: boqResult.projectName,
       wo: `WO-${Math.floor(1000 + Math.random() * 9000)}`,
-      province: detectedProvince, // Lokasi asli otomatis terisi
-      city: detectedCity,         // Lokasi asli otomatis terisi
+      province: detectedProvince,
+      city: detectedCity,
       length: kmzLengthKm > 0 ? kmzLengthKm : boqResult.lengthKm,
-      boqLength: boqResult.lengthKm, // Panjang dari Excel
+      boqLength: boqResult.lengthKm,
       value: totalCalculatedValue,
       status: 'PENDING',
       route: routeCoordinates,
@@ -294,9 +331,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     };
 
-    setLoading(false);
-    onSuccess(newProject);
-    onClose();
+    if (isMountedRef.current) {
+      setLoading(false);
+      onSuccess(newProject);
+      onClose();
+    }
   };
 
   return (
@@ -316,7 +355,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">File Jalur Fiber Optic (.kmz / .kml)</label>
             <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-brand-500 bg-gray-50 relative cursor-pointer">
-              <input type="file" accept=".kmz,.kml" required className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files && setKmzFile(e.target.files[0])} />
+              <input type="file" accept=".kmz,.kml" required className="absolute inset-0 opacity-0 cursor-pointer" ref={kmzFileInputRef} onChange={(e) => e.target.files && setKmzFile(e.target.files[0])} />
               <div className="flex flex-col items-center">
                 <MapPin className="w-8 h-8 text-brand-500 mb-1" />
                 <p className="text-xs font-medium text-gray-700">{kmzFile ? kmzFile.name : 'Klik atau seret file KMZ/KML jalur peta ke sini'}</p>
@@ -327,7 +366,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">File Bill of Quantity Excel (.xlsx / .xls)</label>
             <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-brand-500 bg-gray-50 relative cursor-pointer">
-              <input type="file" accept=".xlsx,.xls" required className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files && setBoqFile(e.target.files[0])} />
+              <input type="file" accept=".xlsx,.xls" required className="absolute inset-0 opacity-0 cursor-pointer" ref={boqFileInputRef} onChange={(e) => e.target.files && setBoqFile(e.target.files[0])} />
               <div className="flex flex-col items-center">
                 <FileText className="w-8 h-8 text-green-600 mb-1" />
                 <p className="text-xs font-medium text-gray-700">{boqFile ? boqFile.name : 'Klik atau seret file Excel BoQ ke sini'}</p>

@@ -71,8 +71,8 @@ export default function VerificationDetailPage() {
     name: '[PREVENTIVE MAINTENANCE AKSES FIBER_OPTIC] DESA BENTE MOROWALI',
     technician: 'Ahmad Irfan',
     date: '27 Agustus 2026',
-    length: 1.284,     // Panjang KMZ asli dari file KMZ (dalam KM atau Meter)
-    boqLength: 1284,   // Panjang BoQ dari metadata Excel (dalam Meter)
+    length: 1.284,     
+    boqLength: 1284,   
     value: 11784900,
     route: [
       [-2.4789, 121.9344],
@@ -85,7 +85,6 @@ export default function VerificationDetailPage() {
     boqItems: []
   };
 
-  // 1. PANJANG KMZ MURNI DARI FILE KMZ (Dikonversi ke Meter secara presisi)
   let kmzLengthMeters = 1284;
   if (project.route && project.route.length > 0) {
     kmzLengthMeters = calculateRouteLengthInMeters(project.route);
@@ -93,12 +92,10 @@ export default function VerificationDetailPage() {
     kmzLengthMeters = Number(project.length) < 50 ? Number(project.length) * 1000 : Number(project.length);
   }
 
-  // 2. PANJANG BOQ MURNI DARI HEADER EXCEL (Dibaca dari boqLength)
   let boqLengthMeters = kmzLengthMeters;
   if (project.boqLength) {
     boqLengthMeters = Number(project.boqLength) < 50 ? Number(project.boqLength) * 1000 : Number(project.boqLength);
   } else if (project.length) {
-    // Fallback for legacy projects where BoQ length was saved in project.length
     boqLengthMeters = Number(project.length) < 50 ? Number(project.length) * 1000 : Number(project.length);
   }
 
@@ -116,25 +113,23 @@ export default function VerificationDetailPage() {
     const submittedPrice = boq?.submittedPrice || 0;
     const subtotalBoq = qty * submittedPrice;
 
-    const isValid = isCodeValid && (submittedPrice <= standardPrice);
+    const isValid = isCodeValid && (submittedPrice === standardPrice);
 
     return { 
       ...boq, 
       standardPrice, 
       subtotalBoq, 
       isMatch: isValid,
-      errorReason: !isCodeValid ? 'Nomor KHS Tidak Terdaftar' : submittedPrice > standardPrice ? 'Harga Melebihi KHS' : null
+      errorReason: !isCodeValid ? 'Nomor KHS Tidak Terdaftar' : submittedPrice !== standardPrice ? 'Harga Tidak Sesuai KHS' : null
     };
   }) : [];
 
   const totalBoqSum = evaluatedItems.reduce((acc: number, curr: any) => acc + curr.subtotalBoq, 0);
   const hasAnyError = evaluatedItems.some((item: any) => !item.isMatch);
 
-  // Toleransi komparasi panjang jalur dalam meter (selisih max 50 meter)
   const lengthDifference = Math.abs(kmzLengthMeters - boqLengthMeters);
   const isLengthMatch = lengthDifference <= 50;
 
-  // STATE UNTUK MENYIMPAN CATATAN VALIDATOR
   const [validatorNotes, setValidatorNotes] = useState(
     hasAnyError 
       ? "Ditemukan ketidaksesuaian nomor KHS / harga pada BoQ. Mohon vendor melakukan revisi." 
@@ -148,7 +143,6 @@ export default function VerificationDetailPage() {
         const projects = JSON.parse(saved);
         const updated = projects.map((p: any) => {
           if (p.name === project.name) {
-            // SIMPAN CATATAN (NOTES) BERSAMA STATUS BARU KE LOCAL STORAGE
             return { ...p, status: newStatus, notes: validatorNotes };
           }
           return p;
@@ -204,15 +198,12 @@ export default function VerificationDetailPage() {
             </div>
             <div className="h-[380px] w-full z-0 relative">
               <MapContainer 
-                center={mapCenter} 
-                zoom={14} 
-                key={`${mapCenter[0]}-${mapCenter[1]}`}
-                className="w-full h-full"
+                {...({ center: mapCenter, zoom: 14, key: `${mapCenter[0]}-${mapCenter[1]}`, className: "w-full h-full" } as any)}
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {project.route && project.route.length > 0 && (
-                  <Polyline positions={project.route} color="#2563eb" weight={6}>
-                    <Tooltip permanent direction="center" className="bg-brand-900 text-white font-bold px-2 py-1 rounded shadow text-xs border-0">
+                  <Polyline {...({ positions: project.route, color: "#2563eb", weight: 6 } as any)}>
+                    <Tooltip {...({ permanent: true, direction: "center", className: "bg-brand-900 text-white font-bold px-2 py-1 rounded shadow text-xs border-0" } as any)}>
                       🛣️ Jalur FO (~{Number(kmzLengthMeters).toFixed(2)} Meter)
                     </Tooltip>
                   </Polyline>
@@ -303,7 +294,6 @@ export default function VerificationDetailPage() {
           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
             <h3 className="font-semibold text-brand-900 mb-4">Keputusan Validator</h3>
             
-            {/* TEXTAREA DENGAN ONCHANGE */}
             <textarea 
               className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-brand-500 outline-none mb-4"
               rows={3}
