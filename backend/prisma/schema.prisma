@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  VALIDATOR
+  VIEWER
+  TECHNICIAN
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  PROCESSING
+  NEED_REVIEW
+  VALIDATED
+  REJECTED
+  REVISION
+}
+
+enum ValidationStatus {
+  MATCH
+  DIFFERENT
+  NOT_FOUND
+  NEED_REVIEW
+}
+
+enum FileType {
+  KMZ
+  BOQ
+  KHS
+  REPORT
+}
+
+model User {
+  id              String    @id @default(uuid())
+  username        String    @unique
+  email           String    @unique
+  password        String
+  role            UserRole
+  fullName        String?
+  company         String?
+  mustChangePw    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  projects        Project[] @relation("TechnicianProjects")
+  uploadedFiles   ProjectFile[]
+  auditLogs       AuditLog[]
+}
+
+model Project {
+  id                  String           @id @default(uuid())
+  projectCode         String           @unique
+  name                String
+  wo                  String?
+  technicianName      String?
+  province            String?
+  city                String?
+  district            String?
+  status              ProjectStatus    @default(DRAFT)
+  kmzLength           Float?
+  boqLength           Float?
+  lengthDifference    Float?
+  lengthDiffPercentage Float?
+  lengthValidationStatus ValidationStatus?
+  boqTotalValue       Float?
+  khsTotalValue       Float?
+  totalPriceDifference Float?
+  priceValidationStatus ValidationStatus?
+  overallStatus       ValidationStatus?
+  validatorNotes      String?
+  technicianId        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  files               ProjectFile[]
+  kmzRoute            KmzRoute?
+  boqItems            BoqItem[]
+  priceValidations    PriceValidation[]
+  lengthValidations   LengthValidation[]
+  auditLogs           AuditLog[]
+  technician          User?   @relation("TechnicianProjects", fields: [technicianId], references: [id])
+}
+
+model ProjectFile {
+  id           String   @id @default(uuid())
+  projectId    String
+  fileType     FileType
+  originalName String
+  storedName   String
+  filePath     String
+  fileSize     Int
+  mimeType     String
+  uploadedById String
+  uploadedAt   DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id])
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+}
+
+model KmzRoute {
+  id          String   @id @default(uuid())
+  projectId   String   @unique
+  geometry    Json?
+  geojson     Json?
+  lengthKm    Float?
+  startLat    Float?
+  startLng    Float?
+  endLat      Float?
+  endLng      Float?
+  bbox        Json?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id])
+}
+
+model BoqItem {
+  id           String   @id @default(uuid())
+  projectId    String
+  itemCode     String?
+  itemName     String
+  unit         String
+  quantity     Float
+  unitPrice    Float
+  totalPrice   Float
+  createdAt    DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id])
+  priceValidations PriceValidation[]
+}
+
+model KhsItem {
+  id              String   @id @default(uuid())
+  khsVersion      String   @default("v1.0")
+  itemCode        String
+  itemName        String
+  unit            String
+  referencePrice  Float
+  effectiveDate   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  priceValidations PriceValidation[]
+
+   @@index([itemCode])
+  @@index([khsVersion])
+  @@unique([khsVersion, itemCode])
+}
+
+model PriceValidation {
+  id                  String           @id @default(uuid())
+  projectId           String
+  boqItemId           String
+  khsItemId           String?
+  boqPrice            Float
+  khsPrice            Float?
+  difference          Float?
+  differencePercentage Float?
+  status              ValidationStatus @default(NOT_FOUND)
+  note                String?
+  createdAt           DateTime @default(now())
+
+  project             Project    @relation(fields: [projectId], references: [id])
+  boqItem             BoqItem    @relation(fields: [boqItemId], references: [id])
+  khsItem             KhsItem?   @relation(fields: [khsItemId], references: [id])
+}
+
+model LengthValidation {
+  id                  String           @id @default(uuid())
+  projectId           String
+  kmzLength           Float
+  boqLength           Float
+  difference          Float
+  differencePercentage Float
+  tolerance           Float
+  status              ValidationStatus @default(NEED_REVIEW)
+  note                String?
+  createdAt           DateTime @default(now())
+
+  project             Project          @relation(fields: [projectId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  projectId   String?
+  userId      String
+  action      String
+  description  String?
+  oldStatus   ProjectStatus?
+  newStatus   ProjectStatus?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  project     Project? @relation(fields: [projectId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([action])
+}
