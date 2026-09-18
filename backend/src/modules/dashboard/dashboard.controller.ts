@@ -2,8 +2,15 @@ import { Request, Response } from 'express';
 import prisma from '../../config/prisma';
 import { successResponse } from '../../utils/apiResponse';
 import { formatIndonesianDate } from '../../utils/dateFormat';
+import { AuthRequest } from '../../middlewares/auth';
 
-export async function getDashboardSummary(req: Request, res: Response) {
+export async function getDashboardSummary(req: AuthRequest, res: Response) {
+  const userRole = req.user?.role || 'VIEWER';
+  const userId = req.user?.userId;
+
+  const isNonAdmin = userRole !== 'ADMIN';
+  const userFilter: any = isNonAdmin && userId ? { technicianId: userId } : {};
+
   const [
     totalProjects,
     submitted,
@@ -14,19 +21,19 @@ export async function getDashboardSummary(req: Request, res: Response) {
     totalProjectValue,
     totalCableLength,
   ] = await Promise.all([
-    prisma.project.count(),
-    prisma.project.count({ where: { status: 'SUBMITTED' } }),
-    prisma.project.count({ where: { status: 'PROCESSING' } }),
-    prisma.project.count({ where: { status: 'NEED_REVIEW' } }),
-    prisma.project.count({ where: { status: 'VALIDATED' } }),
-    prisma.project.count({ where: { status: 'REJECTED' } }),
-    prisma.project.aggregate({ _sum: { boqTotalValue: true } }),
+    prisma.project.count({ where: userFilter }),
+    prisma.project.count({ where: { status: 'SUBMITTED', ...userFilter } }),
+    prisma.project.count({ where: { status: 'PROCESSING', ...userFilter } }),
+    prisma.project.count({ where: { status: 'NEED_REVIEW', ...userFilter } }),
+    prisma.project.count({ where: { status: 'VALIDATED', ...userFilter } }),
+    prisma.project.count({ where: { status: 'REJECTED', ...userFilter } }),
+    prisma.project.aggregate({ _sum: { boqTotalValue: true }, where: userFilter }),
     prisma.kmzRoute.aggregate({ _sum: { lengthKm: true } }),
   ]);
 
   const lengthDiff = await prisma.project.aggregate({
     _sum: { totalPriceDifference: true },
-    where: { status: { in: ['VALIDATED', 'NEED_REVIEW'] } },
+    where: { ...userFilter, status: { in: ['VALIDATED', 'NEED_REVIEW'] } },
   });
 
   return successResponse(res, 200, 'Dashboard summary berhasil diambil', {
@@ -42,7 +49,11 @@ export async function getDashboardSummary(req: Request, res: Response) {
   });
 }
 
-export async function getMonthlyStats(req: Request, res: Response) {
+export async function getMonthlyStats(req: AuthRequest, res: Response) {
+  const userRole = req.user?.role || 'VIEWER';
+  const userId = req.user?.userId;
+  const isNonAdmin = userRole !== 'ADMIN';
+
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const province = req.query.province as string | undefined;
   const city = req.query.city as string | undefined;
@@ -55,6 +66,7 @@ export async function getMonthlyStats(req: Request, res: Response) {
   };
   if (province) where.province = province;
   if (city) where.city = city;
+  if (isNonAdmin && userId) where.technicianId = userId;
 
   const projects = await prisma.project.findMany({ where });
 

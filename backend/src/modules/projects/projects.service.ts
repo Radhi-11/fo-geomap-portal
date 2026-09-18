@@ -108,7 +108,6 @@ export class ProjectService {
         boqLength: boqResult?.lengthKm ? boqResult.lengthKm * 1000 : null,
         boqTotalValue: boqResult?.totalValue || 0,
         status: ProjectStatus.NEED_REVIEW,
-        date: formatIndonesianDate(new Date()),
       };
 
       const project = await prisma.project.create({ data: projectData });
@@ -188,7 +187,7 @@ export class ProjectService {
       ];
     }
 
-    if (params.role === 'TECHNICIAN' && params.userId) {
+    if (params.role !== 'ADMIN' && params.userId) {
       where.technicianId = params.userId;
     }
 
@@ -457,7 +456,7 @@ export class ProjectService {
         submittedPrice: item.submittedPrice,
       })),
       route,
-      date: formatIndonesianDate(new Date()),
+      date: formatIndonesianDate(project.createdAt),
       validationSummary: validationResults,
     };
   }

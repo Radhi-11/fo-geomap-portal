@@ -4,7 +4,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 
 const router = Router();
 
-router.get('/summary', authenticate, authorize('ADMIN', 'VALIDATOR', 'VIEWER'), getDashboardSummary);
-router.get('/monthly', authenticate, authorize('ADMIN', 'VALIDATOR', 'VIEWER'), getMonthlyStats);
+router.get('/summary', authenticate, authorize('ADMIN', 'VALIDATOR', 'VIEWER', 'TECHNICIAN'), getDashboardSummary);
+router.get('/monthly', authenticate, authorize('ADMIN', 'VALIDATOR', 'VIEWER', 'TECHNICIAN'), getMonthlyStats);
 
 export default router;

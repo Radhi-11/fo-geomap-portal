@@ -45,34 +45,22 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 
 export function authorize(...allowedRoles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Akses ditolak. Autentikasi diperlukan',
-        errorCode: 'AUTH_REQUIRED',
-      });
-    }
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Akses ditolak. Autentikasi diperlukan',
+      errorCode: 'AUTH_REQUIRED',
+    });
+  }
 
-    const roleHierarchy: Record<string, number> = {
-      ADMIN: 4,
-      VALIDATOR: 3,
-      TECHNICIAN: 2,
-      VIEWER: 1,
-    };
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Akses ditolak. Izin tidak cukup',
+      errorCode: 'ACCESS_FORBIDDEN',
+    });
+  }
 
-    const userLevel = roleHierarchy[req.user.role] || 0;
-    const requiredLevel = Math.max(
-      ...allowedRoles.map((r) => roleHierarchy[r] || 0),
-    );
-
-    if (userLevel < requiredLevel) {
-      return res.status(403).json({
-        success: false,
-        message: 'Akses ditolak. Izin tidak cukup',
-        errorCode: 'ACCESS_FORBIDDEN',
-      });
-    }
-
-    next();
+  next();
   };
 }
